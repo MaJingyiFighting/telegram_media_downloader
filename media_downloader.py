@@ -627,15 +627,23 @@ async def run_until_all_task_finish():
 
 
 def _exec_loop():
-    """Exec loop"""
+    """Run loop forever"""
+    try:
+        app.loop.run_until_complete(run_until_all_task_finish())
+    except Exception as e:
+        logger.exception(f"{e}")
 
-    app.loop.run_until_complete(run_until_all_task_finish())
+
+# Create a function to monitor download speed periodically
+async def monitor_download_speed():
+    """Monitor download speed periodically"""
+    while app.is_running:
+        check_download_speed(app)
+        await asyncio.sleep(10)  # Check every 10 seconds
 
 
 async def start_server(client: pyrogram.Client):
-    """
-    Start the server using the provided client.
-    """
+    """Start server"""
     await client.start()
 
 
@@ -670,6 +678,10 @@ def main():
         for _ in range(app.max_download_task):
             task = app.loop.create_task(worker(client))
             tasks.append(task)
+            
+        # Add download speed monitoring task
+        speed_monitor_task = app.loop.create_task(monitor_download_speed())
+        tasks.append(speed_monitor_task)
 
         if app.bot_token:
             app.loop.run_until_complete(

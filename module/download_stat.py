@@ -4,8 +4,10 @@ import time
 from enum import Enum
 
 from pyrogram import Client
+from loguru import logger
 
 from module.app import TaskNode
+from module.language import _t
 
 
 class DownloadState(Enum):
@@ -20,6 +22,10 @@ _total_download_speed: int = 0
 _total_download_size: int = 0
 _last_download_time: float = time.time()
 _download_state: DownloadState = DownloadState.Downloading
+
+# variables for download speed monitoring
+_low_speed_start_time: float = 0  # time when download speed drops below min_speed
+_is_speed_low: bool = False  # flag to indicate if speed is low
 
 
 def get_download_result() -> dict:
@@ -42,6 +48,54 @@ def set_download_state(state: DownloadState):
     """set download state"""
     global _download_state
     _download_state = state
+
+
+def check_download_speed(app):
+    """
+    Check download speed and restart program if necessary
+    
+    Parameters
+    ----------
+    app: Application
+        Application instance
+    """
+    global _is_speed_low, _low_speed_start_time
+    
+    current_time = time.time()
+    min_speed = app.min_download_speed
+    restart_limit_time = app.restart_limit_time
+    
+    # If no download is happening, reset the low speed timer
+    if _total_download_speed == 0 and len(_download_result) == 0:
+        _is_speed_low = False
+        _low_speed_start_time = 0
+        return
+    
+    # Check if speed is below minimum
+    if _total_download_speed < min_speed:
+        if not _is_speed_low:
+            # First time speed drops below minimum
+            _is_speed_low = True
+            _low_speed_start_time = current_time
+            logger.warning(
+                f"{_t('Download speed')} ({_total_download_speed} B/s) {_t('is below minimum')} ({min_speed} B/s), "
+                f"{_t('monitoring started')} (下载速度低于最低要求，开始监控)"
+            )
+        elif current_time - _low_speed_start_time > restart_limit_time:
+            # Speed has been low for too long, restart program
+            logger.warning(
+                f"{_t('Download speed has been below')} {min_speed} B/s {_t('for')} {restart_limit_time} {_t('seconds')}, "
+                f"{_t('restarting program')} (下载速度持续低于最低要求，重启程序)"
+            )
+            app.restart_program = True
+    else:
+        # Speed is above minimum, reset the low speed timer
+        if _is_speed_low:
+            logger.info(
+                f"{_t('Download speed')} ({_total_download_speed} B/s) {_t('is back to normal')} (下载速度恢复正常)"
+            )
+        _is_speed_low = False
+        _low_speed_start_time = 0
 
 
 async def update_download_status(
