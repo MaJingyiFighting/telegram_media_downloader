@@ -243,7 +243,7 @@ download_speed_monitor:
 - **enable_download_txt** 启用下载txt文件，默认`false`
 - **download_speed_monitor** - 下载速度监控配置
   - **min_speed** - 最低下载速度限制，单位为字节/秒，如果下载速度持续低于此值超过重启限制时间，程序将自动重启
-  - **restart_limit_time** - 重启限制时间，单位为秒，表示下载速度持续低于最低限制多长时间后触发重启
+  - **restart_limit_time** - 重启限制时间，单位为秒，表示下载速度持续低于最低限制多长时间后触发重启。同时也用于检测连接丢失，当无下载活动或发生连接错误超过此时间时自动重启
 
 ## 执行
 

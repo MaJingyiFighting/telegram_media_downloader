@@ -485,6 +485,11 @@ async def download_media(
                     f"Message[{message.id}]: {_t('Timing out after 3 reties, download skipped.')}"
                 )
         except Exception as e:
+            # Check for connection related errors (检查连接相关错误)
+            if "Connection" in str(e) or "TimeoutError" in str(e):
+                from module.download_stat import mark_connection_issue
+                mark_connection_issue(app)
+            
             # pylint: disable = C0301
             logger.error(
                 f"Message[{message.id}]: "
@@ -535,6 +540,10 @@ async def worker(client: pyrogram.client.Client):
             else:
                 await download_task(client, message, node)
         except Exception as e:
+            # When connection error occurs, mark connection issue (当连接错误发生时，标记连接问题)
+            if "Connection" in str(e):
+                from module.download_stat import mark_connection_issue
+                mark_connection_issue(app)
             logger.exception(f"{e}")
 
 
@@ -544,72 +553,76 @@ async def download_chat_task(
     node: TaskNode,
 ):
     """Download all task"""
-    messages_iter = get_chat_history_v2(
-        client,
-        node.chat_id,
-        limit=node.limit,
-        max_id=node.end_offset_id,
-        offset_id=chat_download_config.last_read_message_id,
-        reverse=True,
-    )
-
-    chat_download_config.node = node
-
-    if chat_download_config.ids_to_retry:
-        logger.info(f"{_t('Downloading files failed during last run')}...")
-        skipped_messages: list = await client.get_messages(  # type: ignore
-            chat_id=node.chat_id, message_ids=chat_download_config.ids_to_retry
+    try:
+        messages_iter = get_chat_history_v2(
+            client,
+            node.chat_id,
+            limit=node.limit,
+            max_id=node.end_offset_id,
+            offset_id=chat_download_config.last_read_message_id,
+            reverse=True,
         )
 
-        for message in skipped_messages:
-            await add_download_task(message, node)
+        chat_download_config.node = node
 
-    async for message in messages_iter:  # type: ignore
-        meta_data = MetaData()
-
-        caption = message.caption
-        if caption:
-            caption = validate_title(caption)
-            app.set_caption_name(node.chat_id, message.media_group_id, caption)
-            app.set_caption_entities(
-                node.chat_id, message.media_group_id, message.caption_entities
+        if chat_download_config.ids_to_retry:
+            logger.info(f"{_t('Downloading files failed during last run')}...")
+            skipped_messages: list = await client.get_messages(  # type: ignore
+                chat_id=node.chat_id, message_ids=chat_download_config.ids_to_retry
             )
-        else:
-            caption = app.get_caption_name(node.chat_id, message.media_group_id)
-        set_meta_data(meta_data, message, caption)
 
-        if app.need_skip_message(chat_download_config, message.id):
-            continue
+            for message in skipped_messages:
+                await add_download_task(message, node)
 
-        if app.exec_filter(chat_download_config, meta_data):
-            await add_download_task(message, node)
-        else:
-            node.download_status[message.id] = DownloadStatus.SkipDownload
-            if message.media_group_id:
-                await upload_telegram_chat(
-                    client,
-                    node.upload_user,
-                    app,
-                    node,
-                    message,
-                    DownloadStatus.SkipDownload,
+        async for message in messages_iter:  # type: ignore
+            meta_data = MetaData()
+
+            caption = message.caption
+            if caption:
+                caption = validate_title(caption)
+                app.set_caption_name(node.chat_id, message.media_group_id, caption)
+                app.set_caption_entities(
+                    node.chat_id, message.media_group_id, message.caption_entities
                 )
+            else:
+                caption = app.get_caption_name(node.chat_id, message.media_group_id)
+            set_meta_data(meta_data, message, caption)
 
-    chat_download_config.need_check = True
-    chat_download_config.total_task = node.total_task
-    node.is_running = True
+            if app.need_skip_message(chat_download_config, message.id):
+                continue
+
+            if app.exec_filter(chat_download_config, meta_data):
+                await add_download_task(message, node)
+            else:
+                node.download_status[message.id] = DownloadStatus.SkipDownload
+                if message.media_group_id:
+                    await upload_telegram_chat(
+                        client,
+                        node.upload_user,
+                        app,
+                        node,
+                        message,
+                        DownloadStatus.SkipDownload,
+                    )
+
+        chat_download_config.need_check = True
+        chat_download_config.total_task = node.total_task
+        node.is_running = True
+    except Exception as e:
+        # Check for connection related errors (检查连接相关错误)
+        if "Connection" in str(e) or "TimeoutError" in str(e):
+            from module.download_stat import mark_connection_issue
+            mark_connection_issue(app)
+        logger.warning(f"Download {node.chat_id} error: {e}")
+    finally:
+        chat_download_config.need_check = True
 
 
 async def download_all_chat(client: pyrogram.Client):
     """Download All chat"""
     for key, value in app.chat_download_config.items():
         value.node = TaskNode(chat_id=key)
-        try:
-            await download_chat_task(client, value, value.node)
-        except Exception as e:
-            logger.warning(f"Download {key} error: {e}")
-        finally:
-            value.need_check = True
+        await download_chat_task(client, value, value.node)
 
 
 async def run_until_all_task_finish():
@@ -637,8 +650,13 @@ def _exec_loop():
 # Create a function to monitor download speed periodically
 async def monitor_download_speed():
     """Monitor download speed periodically"""
+    from module.download_stat import check_download_speed
+    
     while app.is_running:
-        check_download_speed(app)
+        try:
+            check_download_speed(app)
+        except Exception as e:
+            logger.error(f"Error in monitor_download_speed: {e}")
         await asyncio.sleep(10)  # Check every 10 seconds
 
 

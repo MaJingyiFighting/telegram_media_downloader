@@ -27,6 +27,10 @@ _download_state: DownloadState = DownloadState.Downloading
 _low_speed_start_time: float = 0  # time when download speed drops below min_speed
 _is_speed_low: bool = False  # flag to indicate if speed is low
 
+# variables for connection lost detection
+_last_activity_time: float = time.time()  # last time when any download activity happened
+_is_connection_issue: bool = False  # flag to indicate if connection issue is detected
+
 
 def get_download_result() -> dict:
     """get global download result"""
@@ -50,6 +54,27 @@ def set_download_state(state: DownloadState):
     _download_state = state
 
 
+def mark_connection_issue(app):
+    """
+    Mark connection issue and potentially trigger restart
+    
+    Parameters
+    ----------
+    app: Application
+        Application instance
+    """
+    global _is_connection_issue, _last_activity_time
+    
+    if not _is_connection_issue:
+        _is_connection_issue = True
+        current_time = time.time()
+        logger.warning(
+            f"{_t('Connection issue detected')} ({current_time - _last_activity_time:.1f}s {_t('since last activity')}), "
+            f"{_t('restarting program')} (检测到连接问题，重启程序)"
+        )
+        app.restart_program = True
+
+
 def check_download_speed(app):
     """
     Check download speed and restart program if necessary
@@ -59,17 +84,32 @@ def check_download_speed(app):
     app: Application
         Application instance
     """
-    global _is_speed_low, _low_speed_start_time
+    global _is_speed_low, _low_speed_start_time, _last_activity_time, _is_connection_issue
     
     current_time = time.time()
     min_speed = app.min_download_speed
     restart_limit_time = app.restart_limit_time
     
-    # If no download is happening, reset the low speed timer
+    # No active downloads, but we might have a connection issue
     if _total_download_speed == 0 and len(_download_result) == 0:
+        if not _is_connection_issue and current_time - _last_activity_time > restart_limit_time:
+            # No activity for a long time, might be a connection issue
+            _is_connection_issue = True
+            logger.warning(
+                f"{_t('No download activity for')} {restart_limit_time} {_t('seconds')}, "
+                f"{_t('possible connection issue')} (长时间无下载活动，可能存在连接问题)"
+            )
+            app.restart_program = True
+            return
+        
+        # Reset the low speed timer when no downloads
         _is_speed_low = False
         _low_speed_start_time = 0
         return
+    
+    # Update last activity time when there's download happening
+    _last_activity_time = current_time
+    _is_connection_issue = False
     
     # Check if speed is below minimum
     if _total_download_speed < min_speed:
@@ -113,6 +153,10 @@ async def update_download_status(
     global _total_download_speed
     global _total_download_size
     global _last_download_time
+    global _last_activity_time
+    
+    # Update last activity time
+    _last_activity_time = cur_time
 
     if node.is_stop_transmission:
         client.stop_transmission()
