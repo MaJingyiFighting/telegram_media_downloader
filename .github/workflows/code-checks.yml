@@ -1,14 +1,7 @@
 name: Code Quality
 
 on:
-  pull_request:
-    branches: [ master ]
-    paths-ignore:
-      - 'README.md'
-  push:
-    branches: [ master ]
-    paths-ignore:
-      - 'README.md'
+  workflow_dispatch:
 
 jobs:
   pre-commit:

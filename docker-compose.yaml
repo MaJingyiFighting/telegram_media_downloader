@@ -2,7 +2,7 @@ version: "3.3"
 
 services:
   telegram_media_downloader:
-    image: tangyoha/telegram_media_downloader:latest
+    image: ghcr.io/majingyifighting/telegram_media_downloader:latest
     build: .
     ports:
       # Here is what you need to edit
@@ -23,7 +23,10 @@ services:
       - "./log/:/app/log/"
       - "./sessions/:/app/sessions"
       - "./temp/:/app/temp"
-    #restart: "unless-stopped"
+    # unless-stopped: restart the container unless it is explicitly stopped
+    # This enables the container to restart when the download speed is too low
+    # 除非手动停止，否则总是重启容器。这样在下载速度检测功能触发时能够自动重启容器
+    restart: unless-stopped
 # volumes:
 #   sessions:
 #   temp:

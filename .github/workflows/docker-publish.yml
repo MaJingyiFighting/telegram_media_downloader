@@ -21,10 +21,10 @@ jobs:
       with:
         fetch-depth: 2
 
-    - name: Check if compile-image exists on Docker Hub
+    - name: Check if compile-image exists on GitHub Container Registry
       id: check-image
       run: |
-        EXISTS=$(curl --silent --fail --head "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_HUB_USERNAME }}/telegram_media_downloader_compile/tags/latest" > /dev/null && echo "true" || echo "false")
+        EXISTS=$(curl --silent --fail --head "https://ghcr.io/v2/${{ github.repository_owner_lc }}/telegram_media_downloader_compile/manifests/latest" > /dev/null && echo "true" || echo "false")
         echo "exists=$EXISTS" >> $GITHUB_ENV
         echo "exists=$EXISTS" >> $GITHUB_OUTPUT
 
@@ -45,11 +45,18 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Login to Docker Hub
+    - name: Set lowercase repository owner
+      id: lowercase
+      run: |
+        echo "repository_owner_lc=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        echo "repository_owner_lc=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+    - name: Login to GitHub Container Registry
       uses: docker/login-action@v2
       with:
-        username: ${{ secrets.DOCKER_HUB_USERNAME }}
-        password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+        registry: ghcr.io
+        username: ${{ github.repository_owner }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Print Env
       id: env_aa
@@ -66,7 +73,7 @@ jobs:
         push: true
         platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6,linux/386,linux/ppc64le
         target: compile-image
-        tags: ${{ secrets.DOCKER_HUB_USERNAME }}/telegram_media_downloader_compile:latest
+        tags: ghcr.io/${{ env.repository_owner_lc }}/telegram_media_downloader_compile:latest
 
     - name: Build and push runtime-image
       uses: docker/build-push-action@v4
@@ -76,5 +83,5 @@ jobs:
         platforms: linux/amd64,linux/arm64,linux/arm/v7,linux/arm/v6,linux/386,linux/ppc64le
         target: runtime-image
         tags: |
-          ${{ secrets.DOCKER_HUB_USERNAME }}/telegram_media_downloader:latest
-          ${{ secrets.DOCKER_HUB_USERNAME }}/telegram_media_downloader:${{ github.ref_name }}
+          ghcr.io/${{ env.repository_owner_lc }}/telegram_media_downloader:latest
+          ghcr.io/${{ env.repository_owner_lc }}/telegram_media_downloader:${{ github.ref_name }}

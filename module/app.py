@@ -408,6 +408,10 @@ class Application:
         self.date_format: str = "%Y_%m"
         self.drop_no_audio_video: bool = False
         self.enable_download_txt: bool = False
+        
+        # download speed monitoring
+        self.min_download_speed: int = 10240  # 10KB/s
+        self.restart_limit_time: int = 300  # 5 minutes
 
         self.forward_limit_call = LimitCall(max_limit_call_times=33)
 
@@ -543,6 +547,14 @@ class Application:
         self.enable_download_txt = get_config(
             _config, "enable_download_txt", self.enable_download_txt, bool
         )
+
+        # download speed monitor configuration
+        if _config.get("download_speed_monitor"):
+            download_speed_monitor = _config["download_speed_monitor"]
+            if download_speed_monitor.get("min_speed"):
+                self.min_download_speed = download_speed_monitor["min_speed"]
+            if download_speed_monitor.get("restart_limit_time"):
+                self.restart_limit_time = download_speed_monitor["restart_limit_time"]
 
         try:
             date = datetime(2023, 10, 31)
