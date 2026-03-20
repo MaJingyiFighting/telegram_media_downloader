@@ -1,4 +1,4 @@
-FROM python:3.11.9-alpine AS build
+FROM python:3.11.9-alpine AS compile-image
 
 WORKDIR /app
 
@@ -17,15 +17,15 @@ RUN pip install --no-cache-dir \
 RUN apk add --no-cache rclone
 
 
-FROM python:3.11.9-alpine AS runtime
+FROM python:3.11.9-alpine AS runtime-image
 
 WORKDIR /app
 
-# Copy installed deps from build stage
-COPY --from=build /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+# Copy installed deps from compile stage
+COPY --from=compile-image /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 
 # Copy rclone to the path expected by the app (matches code default: ./rclone/rclone)
-COPY --from=build /usr/bin/rclone /app/rclone/rclone
+COPY --from=compile-image /usr/bin/rclone /app/rclone/rclone
 
 # Copy app source code
 COPY . /app
