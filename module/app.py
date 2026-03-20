@@ -14,6 +14,7 @@ from loguru import logger
 from ruamel import yaml
 
 from module.cloud_drive import CloudDrive, CloudDriveConfig
+from module.duplicate_monitor import DuplicateFileMonitor
 from module.filter import Filter
 from module.language import Language, set_language
 from utils.format import replace_date_time, validate_title
@@ -420,6 +421,14 @@ class Application:
             yaml.comments.CommentedSeq([])
         )
         self.group_add_advertisement: dict = {}
+        self.duplicate_monitor_enabled: bool = True
+        self.duplicate_monitor_scan_interval: int = 10
+        self.duplicate_monitor_stable_seconds: int = 3
+        self.duplicate_monitor_header_size: int = 1024 * 1024
+        self.duplicate_monitor_db_path: str = os.path.join(
+            os.path.abspath("."), "duplicate_index.sqlite3"
+        )
+        self.duplicate_monitor: Optional[DuplicateFileMonitor] = None
         self.forward_limit_call = LimitCall(max_limit_call_times=33)
 
         self.loop = asyncio.new_event_loop()
@@ -562,6 +571,25 @@ class Application:
                 self.min_download_speed = download_speed_monitor["min_speed"]
             if download_speed_monitor.get("restart_limit_time"):
                 self.restart_limit_time = download_speed_monitor["restart_limit_time"]
+
+        duplicate_monitor = _config.get("duplicate_monitor")
+        if duplicate_monitor:
+            if duplicate_monitor.get("enabled") is not None:
+                self.duplicate_monitor_enabled = duplicate_monitor["enabled"]
+            if duplicate_monitor.get("scan_interval") is not None:
+                self.duplicate_monitor_scan_interval = int(
+                    duplicate_monitor["scan_interval"]
+                )
+            if duplicate_monitor.get("stable_seconds") is not None:
+                self.duplicate_monitor_stable_seconds = int(
+                    duplicate_monitor["stable_seconds"]
+                )
+            if duplicate_monitor.get("head_bytes") is not None:
+                self.duplicate_monitor_header_size = int(
+                    duplicate_monitor["head_bytes"]
+                )
+            if duplicate_monitor.get("db_path"):
+                self.duplicate_monitor_db_path = duplicate_monitor["db_path"]
         self.filter_advertisement_list = get_config(
             _config,
             "filter_advertisement_list",
@@ -898,6 +926,13 @@ class Application:
             self.config.pop("last_read_message_id")
 
         self.config["language"] = self.language.name
+        self.config["duplicate_monitor"] = {
+            "enabled": self.duplicate_monitor_enabled,
+            "scan_interval": self.duplicate_monitor_scan_interval,
+            "stable_seconds": self.duplicate_monitor_stable_seconds,
+            "head_bytes": self.duplicate_monitor_header_size,
+            "db_path": self.duplicate_monitor_db_path,
+        }
         # for it in self.downloaded_ids:
         #    self.already_download_ids_set.add(it)
 
@@ -944,7 +979,59 @@ class Application:
         self.cloud_drive_config.pre_run()
         if not os.path.exists(self.session_file_path):
             os.makedirs(self.session_file_path)
+        self.init_duplicate_monitor()
         set_language(self.language)
+
+    def init_duplicate_monitor(self):
+        """Initialize the persistent duplicate file monitor."""
+        if not self.duplicate_monitor_enabled:
+            self.close_duplicate_monitor()
+            return
+
+        duplicate_monitor_db_dir = os.path.dirname(self.duplicate_monitor_db_path)
+        if duplicate_monitor_db_dir and not os.path.exists(duplicate_monitor_db_dir):
+            os.makedirs(duplicate_monitor_db_dir, exist_ok=True)
+
+        if self.duplicate_monitor is not None:
+            self.duplicate_monitor.close()
+
+        self.duplicate_monitor = DuplicateFileMonitor(
+            self.duplicate_monitor_db_path,
+            self.duplicate_monitor_header_size,
+        )
+        self.scan_duplicate_files(stable_seconds=0)
+
+    def close_duplicate_monitor(self):
+        """Close the duplicate file monitor if it is active."""
+        if self.duplicate_monitor is not None:
+            self.duplicate_monitor.close()
+            self.duplicate_monitor = None
+
+    def find_duplicate_file_by_unique_id(
+        self, file_unique_id: Optional[str]
+    ) -> Optional[str]:
+        """Find a tracked file by Telegram file_unique_id."""
+        if not self.duplicate_monitor_enabled or self.duplicate_monitor is None:
+            return None
+        return self.duplicate_monitor.find_tracked_file_by_unique_id(file_unique_id)
+
+    def register_monitored_file(
+        self, file_path: str, file_unique_id: Optional[str] = None
+    ) -> str:
+        """Register a file in the duplicate monitor."""
+        if not self.duplicate_monitor_enabled or self.duplicate_monitor is None:
+            return file_path
+        return self.duplicate_monitor.register_file(file_path, file_unique_id)
+
+    def scan_duplicate_files(self, stable_seconds: Optional[float] = None) -> list:
+        """Scan the save directory for externally added duplicates."""
+        if not self.duplicate_monitor_enabled or self.duplicate_monitor is None:
+            return []
+
+        if stable_seconds is None:
+            stable_seconds = self.duplicate_monitor_stable_seconds
+
+        return self.duplicate_monitor.scan_paths([self.save_path], stable_seconds)
 
     def is_match_advertisement(self, caption) -> bool:
         """is match advertisement

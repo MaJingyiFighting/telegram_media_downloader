@@ -198,6 +198,12 @@ allowed_user_ids:
 - 'me'
 date_format: '%Y_%m'
 enable_download_txt: false
+duplicate_monitor:
+  enabled: true
+  scan_interval: 10
+  stable_seconds: 3
+  head_bytes: 1048576
+  db_path: ./duplicate_index.sqlite3
 ```
 
 - **api_hash**  - The api_hash you got from telegram apps
@@ -238,6 +244,12 @@ enable_download_txt: false
 - **allowed_user_ids** - Who is allowed to use the robot? The default login account can be used. Please add single quotes to the name with @.
 - **date_format** Support custom configuration of media_datetime format in file_path_prefix.see [python-datetime](https://docs.python.org/3/library/datetime.html)
 - **enable_download_txt** Enable download txt file, default `false`
+- **duplicate_monitor** - Persistent duplicate tracking and directory scan settings
+  - `enabled` - Enable the duplicate database and background directory scan, default `true`
+  - `scan_interval` - How often to scan `save_path` for externally added files, in seconds
+  - `stable_seconds` - Delay before indexing a newly discovered file so partially written files are skipped for one scan cycle
+  - `head_bytes` - Bytes read from the file head to build the fast pre-hash used before full MD5 verification
+  - `db_path` - SQLite file used to persist duplicate state across sessions
 
 ## Execution
 

@@ -311,6 +311,13 @@ async def save_msg_to_file(
     with open(file_name, "w", encoding="utf-8") as f:
         f.write(message.text or "")
 
+    kept_path = app.register_monitored_file(file_name)
+    if kept_path != file_name:
+        logger.info(
+            f"id={message.id} {file_name} duplicate text file detected, download skipped.\n"
+        )
+        return DownloadStatus.SkipDownload, None
+
     return DownloadStatus.SuccessDownload, file_name
 
 
@@ -414,6 +421,7 @@ async def download_media(
     task_start_time: float = time.time()
     media_size = 0
     _media = None
+    file_unique_id: Optional[str] = None
     message = await fetch_message(client, message)
     try:
         for _type in media_types:
@@ -424,12 +432,26 @@ async def download_media(
                 node.chat_id, message, _media, _type
             )
             media_size = getattr(_media, "file_size", 0)
+            file_unique_id = getattr(_media, "file_unique_id", None)
 
             ui_file_name = file_name
             if app.hide_file_name:
                 ui_file_name = f"****{os.path.splitext(file_name)[-1]}"
 
             if _can_download(_type, file_formats, file_format):
+                tracked_duplicate_path = app.find_duplicate_file_by_unique_id(
+                    file_unique_id
+                )
+                if (
+                    tracked_duplicate_path
+                    and os.path.normcase(os.path.abspath(tracked_duplicate_path))
+                    != os.path.normcase(os.path.abspath(file_name))
+                ):
+                    logger.info(
+                        f"id={message.id} {ui_file_name} duplicate media already tracked, download skipped.\n"
+                    )
+                    return DownloadStatus.SkipDownload, None
+
                 if _is_exist(file_name):
                     file_size = os.path.getsize(file_name)
                     if file_size or file_size == media_size:
@@ -474,6 +496,12 @@ async def download_media(
                 _check_download_finish(media_size, temp_download_path, ui_file_name)
                 await asyncio.sleep(0.5)
                 _move_to_download_path(temp_download_path, file_name)
+                kept_path = app.register_monitored_file(file_name, file_unique_id)
+                if kept_path != file_name:
+                    logger.info(
+                        f"id={message.id} {ui_file_name} duplicate content detected, later file deleted.\n"
+                    )
+                    return DownloadStatus.SkipDownload, None
                 # TODO: if not exist file size or media
                 return DownloadStatus.SuccessDownload, file_name
         except pyrogram.errors.exceptions.bad_request_400.BadRequest:
@@ -679,6 +707,17 @@ async def monitor_download_speed():
         await asyncio.sleep(10)  # Check every 10 seconds
 
 
+async def monitor_duplicate_files():
+    """Monitor save_path for externally added duplicate files."""
+    while app.is_running:
+        try:
+            if app.duplicate_monitor_enabled and app.duplicate_monitor is not None:
+                await app.loop.run_in_executor(app.executor, app.scan_duplicate_files)
+        except Exception as e:
+            logger.error(f"Error in monitor_duplicate_files: {e}")
+        await asyncio.sleep(max(app.duplicate_monitor_scan_interval, 1))
+
+
 async def start_server(client: pyrogram.Client):
     """Start server"""
     await client.start()
@@ -720,6 +759,9 @@ def main():
         # Add download speed monitoring task
         speed_monitor_task = app.loop.create_task(monitor_download_speed())
         tasks.append(speed_monitor_task)
+        if app.duplicate_monitor_enabled:
+            duplicate_monitor_task = app.loop.create_task(monitor_duplicate_files())
+            tasks.append(duplicate_monitor_task)
 
         if app.bot_token:
             app.loop.run_until_complete(
@@ -751,7 +793,10 @@ def main():
         logger.info(_t("Stopped!"))
         # check_for_updates(app.proxy)
         logger.info(f"{_t('update config')}......")
-        app.update_config()
+        try:
+            app.update_config()
+        finally:
+            app.close_duplicate_monitor()
         logger.success(
             f"{_t('Updated last read message_id to config file')},"
             f"{_t('total download')} {app.total_download_task}, "

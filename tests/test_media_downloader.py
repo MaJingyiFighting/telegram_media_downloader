@@ -113,9 +113,18 @@ def rest_app(conf: dict):
     app.cloud_drive_config = CloudDriveConfig()
     app.hide_file_name = False
     app.caption_name_dict: dict = {}
+    app.caption_entities_dict: dict = {}
     app.max_concurrent_transmissions: int = 1
     app.web_host: str = "localhost"
     app.web_port: int = 5000
+    app.duplicate_monitor_enabled = True
+    app.duplicate_monitor_scan_interval = 10
+    app.duplicate_monitor_stable_seconds = 3
+    app.duplicate_monitor_header_size = 1024 * 1024
+    app.duplicate_monitor_db_path = os.path.join(
+        os.path.abspath("."), "duplicate_index.sqlite3"
+    )
+    app.duplicate_monitor = None
     app.config_file = "config_test.yaml"
     app.app_data_file = "data_test.yaml"
     app.config = conf
@@ -344,6 +353,30 @@ class MockClient:
 
     async def edit_message_text(self, *args, **kwargs):
         return True
+
+
+class TrackingMockClient(MockClient):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.download_called = False
+
+    async def download_media(self, *args, **kwargs):
+        self.download_called = True
+        return await super().download_media(*args, **kwargs)
+
+
+class MockDuplicateMonitor:
+    def __init__(self, tracked_path=None, register_result=None):
+        self.tracked_path = tracked_path
+        self.register_result = register_result
+
+    def find_tracked_file_by_unique_id(self, _):
+        return self.tracked_path
+
+    def register_file(self, file_path, _=None):
+        if self.register_result:
+            return self.register_result
+        return file_path
 
 
 def check_for_updates(_: dict = None):
@@ -848,6 +881,33 @@ class MediaDownloaderTestCase(unittest.TestCase):
             )
         )
         self.assertEqual((DownloadStatus.FailedDownload, None), result)
+
+    @mock.patch("media_downloader.app.save_path", new=MOCK_DIR)
+    @mock.patch("media_downloader.logger")
+    def test_download_media_skips_known_duplicate_unique_id(self, _):
+        reset_download_cache()
+        rest_app(MOCK_CONF)
+        client = TrackingMockClient()
+        app.duplicate_monitor = MockDuplicateMonitor(
+            tracked_path=platform_generic_path("/root/project/existing.mp4")
+        )
+
+        message = MockMessage(
+            id=314,
+            media=True,
+            video=MockVideo(
+                file_name="duplicate_video.mp4",
+                mime_type="video/mp4",
+                file_unique_id="dup-314",
+            ),
+        )
+
+        result = self.loop.run_until_complete(
+            async_download_media(client, message, ["video"], {"video": ["mp4"]}, -123)
+        )
+
+        self.assertEqual((DownloadStatus.SkipDownload, None), result)
+        self.assertFalse(client.download_called)
 
     @mock.patch("media_downloader.HookClient", new=MockClient)
     @mock.patch("media_downloader.asyncio.Queue.put")

@@ -199,6 +199,14 @@ download_speed_monitor:
   min_speed: 10240  # 10KB/s
   # 重启限制时间，单位为秒
   restart_limit_time: 300  # 5分钟
+
+# 重复文件监控配置
+duplicate_monitor:
+  enabled: true
+  scan_interval: 10
+  stable_seconds: 3
+  head_bytes: 1048576
+  db_path: ./duplicate_index.sqlite3
 ```
 
 - **api_hash** - 你从电报应用程序获得的 api_hash
@@ -244,6 +252,12 @@ download_speed_monitor:
 - **download_speed_monitor** - 下载速度监控配置
   - **min_speed** - 最低下载速度限制，单位为字节/秒，如果下载速度持续低于此值超过重启限制时间，程序将自动重启
   - **restart_limit_time** - 重启限制时间，单位为秒，表示下载速度持续低于最低限制多长时间后触发重启。同时也用于检测连接丢失，当无下载活动或发生连接错误超过此时间时自动重启
+- **duplicate_monitor** - 持久化重复文件索引与目录巡检配置
+  - **enabled** - 是否启用去重数据库和后台目录扫描，默认`true`
+  - **scan_interval** - 扫描 `save_path` 下外部新增文件的间隔秒数
+  - **stable_seconds** - 新文件发现后延迟多少秒再入库，避免处理还在写入中的文件
+  - **head_bytes** - 计算快速头部 MD5 时读取的字节数，只有头部命中时才会继续计算完整 MD5
+  - **db_path** - 跨会话持久化重复状态的 SQLite 文件路径
 
 ## 执行
 
