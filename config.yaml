@@ -22,3 +22,10 @@ media_types:
 - video_note
 # in linux please use /
 # save_path: E:\github\telegram_media_downloader
+
+# download speed monitoring (下载速度监控)
+download_speed_monitor:
+  # minimum download speed in bytes per second, if download speed is lower than this value for restart_limit_time seconds, program will restart (最低下载速度，单位为字节/秒，如果下载速度持续低于此值超过重启限制时间，程序将自动重启)
+  min_speed: 10240
+  # restart limit time in seconds, also used for connection lost detection (重启限制时间，单位为秒，同时用于连接丢失检测)
+  restart_limit_time: 300

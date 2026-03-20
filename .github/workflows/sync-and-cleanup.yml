@@ -1,0 +1,144 @@
+name: 同步上游代码并清理镜像
+
+on:
+  schedule:
+    # 每周一凌晨 3 点运行
+    - cron: '0 3 * * 1'
+  workflow_dispatch:  # 允许手动触发
+
+# 添加必要的权限
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  sync-upstream:
+    name: 与上游仓库同步
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # 获取完整历史
+      
+      - name: 配置Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      
+      - name: 添加上游仓库
+        run: |
+          git remote add upstream https://github.com/tangyoha/telegram_media_downloader.git
+          git fetch upstream
+      
+      - name: 合并上游更新
+        run: |
+          git checkout master
+          git merge upstream/master -m "🤖 自动合并上游仓库更新"
+      
+      - name: 推送更新
+        run: |
+          git push origin master
+
+  cleanup-images:
+    name: 清理Docker镜像（仅保留latest）
+    runs-on: ubuntu-latest
+    needs: sync-upstream
+    steps:
+      - name: 安装jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
+
+      - name: 登录到GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 设置lowercase仓库所有者
+        id: lowercase
+        run: |
+          echo "repository_owner_lc=$(echo ${{ github.repository_owner }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+      
+      - name: 获取并清理所有非latest镜像
+        run: |
+          # 使用GitHub API获取容器镜像列表
+          PACKAGE_NAME="telegram_media_downloader"
+          REPO_OWNER="${{ env.repository_owner_lc }}"
+          
+          # 创建临时文件存储所有版本ID
+          touch all_versions.txt
+          
+          # 初始化页码和标志
+          PAGE=1
+          HAS_MORE=true
+          TOTAL_VERSIONS=0
+          
+          echo "开始获取所有镜像版本信息..."
+          
+          # 使用循环获取所有页面的版本
+          while [ "$HAS_MORE" = "true" ]; do
+            echo "正在获取第 $PAGE 页镜像版本..."
+            
+            # 获取当前页的版本列表
+            RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/user/packages/container/${PACKAGE_NAME}/versions?per_page=100&page=${PAGE}")
+            
+            # 解析响应中的版本ID
+            CURRENT_PAGE_VERSIONS=$(echo "$RESPONSE" | jq -r '.[] | .id')
+            VERSIONS_COUNT=$(echo "$CURRENT_PAGE_VERSIONS" | grep -v '^$' | wc -l)
+            
+            # 如果当前页有版本，则添加到文件中
+            if [ "$VERSIONS_COUNT" -gt 0 ]; then
+              echo "$CURRENT_PAGE_VERSIONS" >> all_versions.txt
+              TOTAL_VERSIONS=$((TOTAL_VERSIONS + VERSIONS_COUNT))
+              echo "第 $PAGE 页找到 $VERSIONS_COUNT 个版本"
+              # 继续检查下一页
+              PAGE=$((PAGE + 1))
+            else
+              # 如果当前页没有版本，说明已经获取完毕
+              HAS_MORE=false
+              echo "没有更多页面，镜像版本获取完毕"
+            fi
+          done
+          
+          echo "共找到 $TOTAL_VERSIONS 个镜像版本"
+          
+          # 记录要保留和删除的数量
+          KEPT=0
+          DELETED=0
+          
+          # 遍历所有版本，只保留latest标签的镜像
+          while read -r VERSION_ID; do
+            # 跳过空行
+            if [ -z "$VERSION_ID" ]; then
+              continue
+            fi
+            
+            # 获取镜像的标签信息
+            VERSION_INFO=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/user/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}")
+            
+            # 检查标签列表中是否包含"latest"
+            HAS_LATEST=$(echo "$VERSION_INFO" | jq -r '.metadata.container.tags | indices("latest") | length > 0')
+            
+            if [ "$HAS_LATEST" = "true" ]; then
+              echo "保留latest标签镜像，版本ID: ${VERSION_ID}"
+              KEPT=$((KEPT + 1))
+            else
+              echo "删除非latest镜像，版本ID: ${VERSION_ID}"
+              curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                "https://api.github.com/user/packages/container/${PACKAGE_NAME}/versions/${VERSION_ID}"
+              DELETED=$((DELETED + 1))
+              
+              # 添加短暂延迟，避免API限制
+              sleep 0.5
+            fi
+          done < all_versions.txt
+          
+          echo "镜像清理完成，保留 $KEPT 个镜像，删除 $DELETED 个镜像" 
+          
+          # 清理临时文件
+          rm -f all_versions.txt 

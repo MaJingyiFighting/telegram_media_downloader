@@ -80,7 +80,7 @@ pip3 install -r requirements.txt
 
 确保安装了 **docker** 和 **docker-compose**
 ```sh
-docker pull tangyoha/telegram_media_downloader:latest
+docker pull ghcr.io/majingyifighting/telegram_media_downloader:latest
 mkdir -p ~/app && mkdir -p ~/app/log/ && cd ~/app
 wget https://raw.githubusercontent.com/tangyoha/telegram_media_downloader/blob/master/docker-compose.yaml -O docker-compose.yaml
 wget https://raw.githubusercontent.com/tangyoha/telegram_media_downloader/blob/master/config.yaml -O config.yaml
@@ -96,7 +96,7 @@ docker-compose run --rm telegram_media_downloader
 docker-compose up -d
 
 ＃ 升级
-docker pull tangyoha/telegram_media_downloader:latest
+docker pull ghcr.io/majingyifighting/telegram_media_downloader:latest
 cd ~/app
 docker-compose down
 docker-compose up -d
@@ -173,6 +173,7 @@ save_path: D:\telegram_media_downloader
 file_path_prefix:
 - chat_title
 - media_datetime
+- media_type
 upload_drive:
   enable_upload_file: true
   remote_dir: drive:/telegram
@@ -191,6 +192,13 @@ allowed_user_ids:
 - 'me'
 date_format: '%Y_%m'
 enable_download_txt: false
+
+# 下载速度监控配置
+download_speed_monitor:
+  # 最低下载速度限制，单位为字节/秒，如果下载速度持续低于此值超过重启限制时间，程序将自动重启
+  min_speed: 10240  # 10KB/s
+  # 重启限制时间，单位为秒
+  restart_limit_time: 300  # 5分钟
 ```
 
 - **api_hash** - 你从电报应用程序获得的 api_hash
@@ -199,12 +207,12 @@ enable_download_txt: false
 - **chat** -  多频道
   - `chat_id` -  您要下载媒体的聊天/频道的 ID。你从上述步骤中得到的。
   - `download_filter` - 下载过滤器, 查阅 [如何使用过滤器](https://github.com/tangyoha/telegram_media_downloader/wiki/%E5%A6%82%E4%BD%95%E4%BD%BF%E7%94%A8%E8%BF%87%E6%BB%A4%E5%99%A8)
-  - `last_read_message_id` -如果这是您第一次阅读频道，请将其设置为“0”，或者如果您已经使用此脚本下载媒体，它将有一些数字，这些数字会在脚本成功执行后自动更新。不要改变它。
+  - `last_read_message_id` -如果这是您第一次阅读频道，请将其设置为"0"，或者如果您已经使用此脚本下载媒体，它将有一些数字，这些数字会在脚本成功执行后自动更新。不要改变它。
 - **chat_id** - 您要下载媒体的聊天/频道的 ID。你从上述步骤中得到的。
-- **last_read_message_id** - 如果这是您第一次阅读频道，请将其设置为“0”，或者如果您已经使用此脚本下载媒体，它将有一些数字，这些数字会在脚本成功执行后自动更新。不要改变它。
+- **last_read_message_id** - 如果这是您第一次阅读频道，请将其设置为"0"，或者如果您已经使用此脚本下载媒体，它将有一些数字，这些数字会在脚本成功执行后自动更新。不要改变它。
 - **ids_to_retry** - `保持原样。`下载器脚本使用它来跟踪所有跳过的下载，以便在下次执行脚本时可以下载它。
 - **media_types** - 要下载的媒体类型，您可以更新要下载的媒体类型，它可以是一种或任何可用类型。
-- **file_formats** - 为支持的媒体类型（“音频”、“文档”和“视频”）下载的文件类型。默认格式为“all”，下载所有文件。
+- **file_formats** - 为支持的媒体类型（"音频"、"文档"和"视频"）下载的文件类型。默认格式为"all"，下载所有文件。
 - **save_path** - 你想存储下载文件的根目录
 - **file_path_prefix** - 存储文件子文件夹，列表的顺序不定，可以随机组合
   - `chat_title`      - 聊天频道或者群组标题, 如果找不到标题则为配置文件中的`chat_id`
@@ -233,6 +241,9 @@ enable_download_txt: false
 - **allowed_user_ids** - 允许哪些人使用机器人，默认登录账号可以使用，带@的名称请加单引号
 - **date_format** - 支持自定义配置file_path_prefix中media_datetime的格式，具体格式查看 [python-datetime](https://docs.python.org/zh-cn/3/library/time.html)
 - **enable_download_txt** 启用下载txt文件，默认`false`
+- **download_speed_monitor** - 下载速度监控配置
+  - **min_speed** - 最低下载速度限制，单位为字节/秒，如果下载速度持续低于此值超过重启限制时间，程序将自动重启
+  - **restart_limit_time** - 重启限制时间，单位为秒，表示下载速度持续低于最低限制多长时间后触发重启。同时也用于检测连接丢失，当无下载活动或发生连接错误超过此时间时自动重启
 
 ## 执行
 
@@ -277,7 +288,7 @@ proxy:
 
 ### 想帮忙？
 
-想要提交错误、贡献一些代码或改进文档？出色的！阅读我们的 [贡献指南](./CONTRIBUTING.md)。
+想要提交错误、贡献一些代码或改进文档？出色！阅读我们的 [贡献指南](./CONTRIBUTING.md)。
 
 ### 行为守则
 
